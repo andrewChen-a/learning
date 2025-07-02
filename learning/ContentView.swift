@@ -7,6 +7,8 @@ struct ContentView: View {
     // @State 属性包装器让视图在 player 发生变化时进行刷新
     @State private var player: AVPlayer?
     @State private var showingFileImporter = false // 新增：控制文件选择器显示与隐藏的状态
+    @State private var showingRecentVideosSheet = false // 新增：控制最近观看列表的显示
+    @State private var recentVideos: [RecentVideo] = [] // 新增：存储最近观看的视频列表
 
     var body: some View {
         VStack {
@@ -72,6 +74,24 @@ struct ContentView: View {
                     case .success(let urls):
                         // 用户成功选择了文件
                         if let selectedURL = urls.first { // 因为不允许选择多个，所以直接取第一个
+                            
+                            // 1. 创建新的 RecentVideo 实例 (如果成功)
+                            if let newRecentVideo = RecentVideo(url: selectedURL) {
+                                // 2. 将视频添加到 UserDefaults (持久化存储)
+                                UserDefaults.standard.addOrUpdateRecentVideo(newRecentVideo)
+                                
+                                // 3. 重新从 UserDefaults 加载更新后的列表到 @State 变量
+                                //    这将确保 `recentVideos` 数组是最新的
+                                recentVideos = UserDefaults.standard.loadRecentVideos()
+                                
+                                // 4. 打印更新后的 recentVideos 列表
+                                print("--- 更新后的 Recent 列表数据 ---")
+                                for video in recentVideos {
+                                    print("ID: \(video.id.uuidString.prefix(8))... Name: \(video.name), Last Watched: \(video.lastWatchedDate)")
+                                    // 可以在这里进一步打印 video.url 来验证 URL 是否正确解析
+                                }
+                                print("----------------------------")
+                            
                             // ****** 关键：需要处理安全范围访问权限 ******
                             // 启动安全范围访问，这样 App 才能访问这个文件（即使 App 关闭再打开）
                             _ = selectedURL.startAccessingSecurityScopedResource()
@@ -79,7 +99,9 @@ struct ContentView: View {
                             // 使用选择的 URL 初始化 AVPlayer
                             player = AVPlayer(url: selectedURL)
                             player?.play() // 自动播放
-                            
+                            } else {
+                                print("无法为选定的URL创建RecentVideo条目：\(selectedURL)")
+                            }
                             // 注意：理论上，当不再需要访问时，应该调用 selectedURL.stopAccessingSecurityScopedResource()
                             // 但对于播放器，只要播放器存在，就一直需要访问。
                             // 更复杂的应用会保存书签数据（bookmark data）以便下次启动时直接访问
@@ -90,15 +112,91 @@ struct ContentView: View {
                         // 可以在这里显示一个用户友好的错误消息
                     }
                 }
+                
+                // ***** 新增：Recent 按钮 *****
+
+                Button("Recent") {
+                    showingRecentVideosSheet = true // 设置状态为 true，显示最近观看列表
+                }
+                .buttonStyle(.bordered)
+                // ***** 新增：Sheet 修饰符，用于显示最近观看列表 *****
+                .sheet(isPresented: $showingRecentVideosSheet) {
+                    // 最近观看视频列表视图
+                    RecentVideosListView(recentVideos: $recentVideos) { selectedVideoURL in
+                        // 用户从列表中选择了一个视频，进行播放
+                        player = AVPlayer(url: selectedVideoURL)
+                        player?.play()
+                        showingRecentVideosSheet = false // 关闭列表
+                    }
+                }
             }
             .padding()
         }
         // MARK: - 视图出现时加载视频
         .onAppear { // content view出现时回调
+            // 视图出现时加载最近观看的视频列表
+            recentVideos = UserDefaults.standard.loadRecentVideos()
         }
     }
 
     
+}
+
+// MARK: - 最近观看视频列表视图
+// 为了保持 ContentView 简洁，我们将 RecentVideosListView 放在单独的 struct 中
+struct RecentVideosListView: View {
+    @Binding var recentVideos: [RecentVideo] // 绑定最近视频列表数据
+    @Environment(\.dismiss) var dismiss // 用于关闭 Sheet
+    var onSelectVideo: (URL) -> Void // 回调闭包，用于传递选中的视频 URL
+
+    var body: some View {
+        VStack {
+            Text("最近观看")
+                .font(.largeTitle)
+                .padding()
+
+            if recentVideos.isEmpty {
+                Spacer()
+                Text("还没有观看记录。")
+                    .foregroundColor(.gray)
+                Spacer()
+            } else {
+                List {
+                    ForEach(recentVideos) { video in
+                        Button {
+                            // 当用户点击视频时
+                            if let videoURL = video.url {
+                                onSelectVideo(videoURL) // 调用回调，播放视频
+                            } else {
+                                print("无法解析视频URL：\(video.name)")
+                            }
+                        } label: {
+                            HStack {
+                                Text(video.name)
+                                Spacer()
+                                Text(video.lastWatchedDate, format: .dateTime.month().day().hour().minute())
+                                    .font(.caption)
+                                    .foregroundColor(.gray)
+                            }
+                        }
+                        .buttonStyle(.plain) // 列表中的按钮通常使用 .plain 样式
+                    }
+                    // 添加删除功能 (可选)
+                    .onDelete { offsets in
+                        recentVideos.remove(atOffsets: offsets)
+                        UserDefaults.standard.saveRecentVideos(recentVideos) // 更新 UserDefaults
+                    }
+                }
+            }
+
+            Button("关闭") {
+                dismiss() // 关闭当前 Sheet
+            }
+            .buttonStyle(.bordered)
+            .padding()
+        }
+        .frame(minWidth: 400, minHeight: 300) // 给 Sheet 设置最小尺寸
+    }
 }
 
 // MARK: - 预览
