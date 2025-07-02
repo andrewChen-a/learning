@@ -6,6 +6,7 @@ struct ContentView: View {
     // 声明一个 @State 变量来保存 AVPlayer 实例
     // @State 属性包装器让视图在 player 发生变化时进行刷新
     @State private var player: AVPlayer?
+    @State private var showingFileImporter = false // 新增：控制文件选择器显示与隐藏的状态
 
     var body: some View {
         VStack {
@@ -54,32 +55,50 @@ struct ContentView: View {
                     player.seek(to: newTime)
                 }
                 .buttonStyle(.bordered)
+                
+                Button("选择视频文件...") {
+                    showingFileImporter = true // 设置状态为 true，显示文件选择器
+                }
+                .buttonStyle(.bordered)
+                
+                // ***** 新增：文件导入器修饰符 *****
+                .fileImporter(
+                    isPresented: $showingFileImporter, // 绑定控制显示的状态
+                    allowedContentTypes: [UTType.movie], // 允许选择的类型为电影（视频）文件
+                    allowsMultipleSelection: false // 不允许多选，只选择一个文件
+                ) { result in
+                    // 处理文件选择的结果
+                    switch result {
+                    case .success(let urls):
+                        // 用户成功选择了文件
+                        if let selectedURL = urls.first { // 因为不允许选择多个，所以直接取第一个
+                            // ****** 关键：需要处理安全范围访问权限 ******
+                            // 启动安全范围访问，这样 App 才能访问这个文件（即使 App 关闭再打开）
+                            _ = selectedURL.startAccessingSecurityScopedResource()
+                            
+                            // 使用选择的 URL 初始化 AVPlayer
+                            player = AVPlayer(url: selectedURL)
+                            player?.play() // 自动播放
+                            
+                            // 注意：理论上，当不再需要访问时，应该调用 selectedURL.stopAccessingSecurityScopedResource()
+                            // 但对于播放器，只要播放器存在，就一直需要访问。
+                            // 更复杂的应用会保存书签数据（bookmark data）以便下次启动时直接访问
+                        }
+                    case .failure(let error):
+                        // 用户取消选择或发生错误
+                        print("选择文件失败：\(error.localizedDescription)")
+                        // 可以在这里显示一个用户友好的错误消息
+                    }
+                }
             }
             .padding()
         }
         // MARK: - 视图出现时加载视频
         .onAppear { // content view出现时回调
-            loadLocalVideo()
         }
     }
 
-    // MARK: - 加载本地视频的函数
-    private func loadLocalVideo() {
-        // 尝试获取本地视频文件的 URL
-        // 假设你的视频文件名为 "sample_video.mp4"
-        // 确保它已经添加到了你的 Xcode 项目中，并且在 Build Phases -> Copy Bundle Resources 中
-        // 替换 "sample_video" 为你实际的视频文件名（不含扩展名）
-        // 替换 "mp4" 为你实际的视频文件扩展名
-        if let videoURL = Bundle.main.url(forResource: "sample_video", withExtension: "mp4") {
-            // 使用视频 URL 初始化 AVPlayer
-            player = AVPlayer(url: videoURL)
-            // 可选：加载完成后自动播放
-            // player?.play()
-        } else {
-            print("错误：无法找到本地视频文件 'sample_video.mp4'。请检查文件名和路径。")
-            // 你可以在这里显示一个错误提示给用户
-        }
-    }
+    
 }
 
 // MARK: - 预览
