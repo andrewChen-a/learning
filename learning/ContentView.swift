@@ -9,7 +9,10 @@ struct ContentView: View {
     @State private var showingFileImporter = false // 新增：控制文件选择器显示与隐藏的状态
     @State private var showingRecentVideosSheet = false // 新增：控制最近观看列表的显示
     @State private var recentVideos: [RecentVideo] = [] // 新增：存储最近观看的视频列表
-
+    // 定义预设的播放速度选项
+    let playbackRates: [Float] = [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0]
+    // MARK: - 新增：当前播放速度的状态变量
+    @State private var currentPlaybackRate: Float = 1.0
     var body: some View {
         VStack {
             // MARK: - 视频播放器视图
@@ -30,7 +33,7 @@ struct ContentView: View {
             // MARK: - 控制按钮
             HStack {
                 Button("播放") {
-                    player?.play()
+                    player?.playImmediately(atRate: currentPlaybackRate) // 使用 playImmediately(atRate:) 确保按当前速度播放
                 }
                 .buttonStyle(.borderedProminent) // macOS 风格的按钮样式
 
@@ -57,6 +60,35 @@ struct ContentView: View {
                     player.seek(to: newTime)
                 }
                 .buttonStyle(.bordered)
+                Spacer()
+
+                // MARK: - 倍速按钮和弹出菜单
+                Menu {
+                    ForEach(playbackRates, id: \.self) { rate in
+                        Button {
+                            setPlaybackRate(Float(rate)) // 将 Double 转换为 Float 传递给 setPlaybackRate
+                        } label: {
+                            // 高亮显示当前选中的速度
+                            if Float(rate) == currentPlaybackRate { // 比较时也转为 Float
+                                Label(String(format: "%.2fx", rate), systemImage: "checkmark")
+                            } else {
+                                Text(String(format: "%.2fx", rate))
+                            }
+                        }
+                    }
+                } label: {
+                    // 按钮的显示文本，显示当前速度
+                    Label(String(format: "倍速 (%.2fx)", currentPlaybackRate), systemImage: "speedometer")
+                        .font(.body)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(Capsule().fill(Color.accentColor.opacity(0.2))) // 简单背景
+                        .foregroundColor(.primary)
+                }
+                .menuStyle(.borderlessButton) // 确保按钮样式简洁
+                .fixedSize() // 防止按钮内容改变时大小跳动
+                
+                Spacer() // 在速度控制和文件选择之间加个间隔
                 
                 Button("选择视频文件...") {
                     showingFileImporter = true // 设置状态为 true，显示文件选择器
@@ -97,8 +129,11 @@ struct ContentView: View {
                             _ = selectedURL.startAccessingSecurityScopedResource()
                             
                             // 使用选择的 URL 初始化 AVPlayer
+                                
                             player = AVPlayer(url: selectedURL)
-                            player?.play() // 自动播放
+                                // 播放新视频时，默认设置为 1.0x 速度
+                                currentPlaybackRate = 1.0
+                                player?.playImmediately(atRate: currentPlaybackRate) // 播放时使用当前速度
                             } else {
                                 print("无法为选定的URL创建RecentVideo条目：\(selectedURL)")
                             }
@@ -125,7 +160,7 @@ struct ContentView: View {
                     RecentVideosListView(recentVideos: $recentVideos) { selectedVideoURL in
                         // 用户从列表中选择了一个视频，进行播放
                         player = AVPlayer(url: selectedVideoURL)
-                        player?.play()
+                        player?.playImmediately(atRate: currentPlaybackRate)// 播放时使用当前速度
                         showingRecentVideosSheet = false // 关闭列表
                     }
                 }
@@ -138,8 +173,26 @@ struct ContentView: View {
             recentVideos = UserDefaults.standard.loadRecentVideos()
         }
     }
-
     
+    // MARK: - 设置播放速度的函数 (已优化为立即生效)
+    private func setPlaybackRate(_ rate: Float) {
+        guard let player = player else {
+            print("DEBUG: Player instance is nil, cannot set rate.")
+            return
+        }
+
+        currentPlaybackRate = rate // 更新 SwiftUI 视图的状态变量
+
+        // 核心改变：直接使用 playImmediately(atRate:) 强制播放并设置新速度
+        player.playImmediately(atRate: rate)
+
+        print("DEBUG: Player rate set and playing immediately at: \(rate)")
+
+        // 如果你愿意，可以保留延时打印用于最终确认
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            print("DEBUG: Player rate after delay: \(player.rate)")
+        }
+    }
 }
 
 // MARK: - 最近观看视频列表视图
